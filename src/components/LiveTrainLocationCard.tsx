@@ -62,6 +62,86 @@ const validCoordinate = (lat: unknown, lng: unknown): lat is number =>
   typeof lat === 'number' && Number.isFinite(lat) && lat >= -90 && lat <= 90 &&
   typeof lng === 'number' && Number.isFinite(lng) && lng >= -180 && lng <= 180;
 
+
+type LngLat = [number, number];
+
+const getTrackCoordinates = (geometry: unknown): LngLat[] => {
+  if (!geometry || typeof geometry !== 'object') return [];
+  const value = geometry as {
+    coordinates?: unknown;
+    geometry?: { coordinates?: unknown };
+    geojson?: { geometry?: { coordinates?: unknown } };
+  };
+  const raw = Array.isArray(value.coordinates) ? value.coordinates :
+    Array.isArray(value.geometry?.coordinates) ? value.geometry.coordinates :
+    Array.isArray(value.geojson?.geometry?.coordinates) ? value.geojson.geometry.coordinates : [];
+  return raw.filter((item): item is LngLat =>
+    Array.isArray(item) && item.length >= 2 &&
+    typeof item[0] === 'number' && Number.isFinite(item[0]) && item[0] >= -180 && item[0] <= 180 &&
+    typeof item[1] === 'number' && Number.isFinite(item[1]) && item[1] >= -90 && item[1] <= 90
+  );
+};
+
+// Locate station endpoints on the provider's rail-track geometry and interpolate by
+// the provider's reported segment progress. Falls back to station-to-station interpolation
+// below when geometry is absent or cannot be aligned to the reported stops.
+const interpolateOnTrack = (
+  coordinates: LngLat[],
+  start: { lat: number; lng: number },
+  end: { lat: number; lng: number },
+  progress: number
+): { lat: number; lng: number } | null => {
+  if (coordinates.length < 2 || progress < 0 || progress > 1) return null;
+  const meanLat = (start.lat + end.lat) / 2;
+  const cosLat = Math.cos(meanLat * Math.PI / 180);
+  const xy = (point: LngLat) => ({ x: point[0] * cosLat, y: point[1] });
+  const cumulative = [0];
+  for (let i = 1; i < coordinates.length; i++) {
+    const a = xy(coordinates[i - 1]);
+    const b = xy(coordinates[i]);
+    cumulative.push(cumulative[i - 1] + Math.hypot(b.x - a.x, b.y - a.y));
+  }
+
+  const along = (target: { lat: number; lng: number }) => {
+    const tPoint = { x: target.lng * cosLat, y: target.lat };
+    let bestDistance = Number.POSITIVE_INFINITY;
+    let bestAlong = 0;
+    for (let i = 1; i < coordinates.length; i++) {
+      const a = xy(coordinates[i - 1]);
+      const b = xy(coordinates[i]);
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const denom = dx * dx + dy * dy;
+      const t = denom === 0 ? 0 : Math.max(0, Math.min(1, ((tPoint.x - a.x) * dx + (tPoint.y - a.y) * dy) / denom));
+      const projectedX = a.x + t * dx;
+      const projectedY = a.y + t * dy;
+      const distance = (tPoint.x - projectedX) ** 2 + (tPoint.y - projectedY) ** 2;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestAlong = cumulative[i - 1] + Math.sqrt(denom) * t;
+      }
+    }
+    return bestAlong;
+  };
+
+  const from = along(start);
+  const to = along(end);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) return null;
+  const target = from + (to - from) * progress;
+  for (let i = 1; i < coordinates.length; i++) {
+    if (target <= cumulative[i]) {
+      const length = cumulative[i] - cumulative[i - 1];
+      const t = length === 0 ? 0 : (target - cumulative[i - 1]) / length;
+      return {
+        lng: coordinates[i - 1][0] + (coordinates[i][0] - coordinates[i - 1][0]) * t,
+        lat: coordinates[i - 1][1] + (coordinates[i][1] - coordinates[i - 1][1]) * t
+      };
+    }
+  }
+  const last = coordinates[coordinates.length - 1];
+  return { lng: last[0], lat: last[1] };
+};
+
 const formatUpdated = (value?: string | null) => {
   if (!value) return 'Timestamp not supplied by provider';
   const date = new Date(value);
@@ -144,7 +224,18 @@ export const LiveTrainLocationCard: React.FC<LiveTrainLocationCardProps> = ({ tr
       prev && next && typeof prev.lat === 'number' && typeof prev.lng === 'number' && typeof next.lat === 'number' && typeof next.lng === 'number' && validCoordinate(prev.lat, prev.lng) && validCoordinate(next.lat, next.lng) &&
       typeof progress === 'number' && Number.isFinite(progress) && progress >= 0 && progress <= 1
     ) {
-      // This is a station-to-station interpolation, not a GPS fix. Always label it as approximate.
+      const trackCoordinates = getTrackCoordinates(payload.geometry);
+      const trackPoint = interpolateOnTrack(
+        trackCoordinates,
+        { lat: prev.lat, lng: prev.lng },
+        { lat: next.lat, lng: next.lng },
+        progress
+      );
+      if (trackPoint && validCoordinate(trackPoint.lat, trackPoint.lng)) {
+        return { ...trackPoint, source: 'estimated' };
+      }
+
+      // Fallback: station-to-station interpolation is not a GPS fix. Always label it approximate.
       return {
         lat: prev.lat + (next.lat - prev.lat) * progress,
         lng: prev.lng + (next.lng - prev.lng) * progress,
