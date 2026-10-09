@@ -38,7 +38,7 @@ const FALLBACK_ANSWERS: Record<string, string> = {
 // Live train running status proxy. Keep the provider key on the server, never in browser code.
 app.get('/api/train-live/:trainNumber', async (req, res) => {
   const { trainNumber } = req.params;
-  if (!/^\\d{5}$/.test(trainNumber)) {
+  if (!/^\d{5}$/.test(trainNumber)) {
     res.status(400).json({ success: false, error: 'Enter a valid 5-digit train number.' });
     return;
   }
