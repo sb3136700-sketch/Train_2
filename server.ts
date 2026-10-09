@@ -35,6 +35,60 @@ const FALLBACK_ANSWERS: Record<string, string> = {
   berth: "Lower Berths (LB) are ideal for senior citizens. Middle Berths (MB) should be folded up during daytime (6:00 AM to 10:00 PM) to allow Lower and Upper berth passengers to sit comfortably, as per official IRCTC rules."
 };
 
+// Live train running status proxy. Keep the provider key on the server, never in browser code.
+app.get('/api/train-live/:trainNumber', async (req, res) => {
+  const { trainNumber } = req.params;
+  if (!/^\\d{5}$/.test(trainNumber)) {
+    res.status(400).json({ success: false, error: 'Enter a valid 5-digit train number.' });
+    return;
+  }
+
+  const providerKey = process.env.RAILRADAR_API_KEY;
+  if (!providerKey) {
+    res.status(503).json({
+      success: false,
+      error: 'Railway live feed is not configured yet. Add RAILRADAR_API_KEY to the server environment and restart/redeploy.'
+    });
+    return;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  try {
+    const providerResponse = await fetch(
+      `https://api.railradar.in/v1/trains/${encodeURIComponent(trainNumber)}/live?geometry=true&includeCoordinates=true`,
+      {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${providerKey}`, Accept: 'application/json' },
+        signal: controller.signal
+      }
+    );
+    let payload: any = null;
+    try { payload = await providerResponse.json(); } catch { /* handled below */ }
+
+    if (!providerResponse.ok || payload?.success === false || !payload?.data) {
+      const providerMessage = typeof payload?.error === 'string'
+        ? payload.error
+        : payload?.error?.message || 'The railway provider did not return live train data.';
+      res.status(providerResponse.status === 401 ? 502 : (providerResponse.ok ? 502 : providerResponse.status)).json({
+        success: false,
+        error: providerResponse.status === 401 ? 'The railway API key was rejected. Check RAILRADAR_API_KEY.' : providerMessage
+      });
+      return;
+    }
+
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ success: true, data: payload.data, timestamp: new Date().toISOString() });
+  } catch (error) {
+    console.error('Live train status request failed:', error);
+    res.status(502).json({
+      success: false,
+      error: 'Live railway data is temporarily unavailable. Try refresh again later.'
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+});
 // Rail Travel AI Assistant endpoint
 app.post('/api/rail-assistant', async (req, res) => {
   try {
