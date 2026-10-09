@@ -158,7 +158,8 @@ export const LiveTrainLocationCard: React.FC<LiveTrainLocationCardProps> = ({ tr
   const sourceTime = payload?.sourceUpdatedAt || null;
   const sourceAgeMs = sourceTime ? Date.now() - new Date(sourceTime).getTime() : null;
   const sourceIsStale = sourceAgeMs != null && (!Number.isFinite(sourceAgeMs) || sourceAgeMs > 120_000);
-  const liveConfirmed = Boolean(payload?.isLive && !sourceIsStale);
+  const sourceFresh = Boolean(sourceTime && !sourceIsStale);
+  const liveConfirmed = Boolean(payload?.isLive && sourceFresh);
   const mapUrl = point
     ? `https://www.openstreetmap.org/export/embed.html?bbox=${(point.lng - 0.12).toFixed(5)}%2C${(point.lat - 0.08).toFixed(5)}%2C${(point.lng + 0.12).toFixed(5)}%2C${(point.lat + 0.08).toFixed(5)}&layer=mapnik&marker=${point.lat.toFixed(6)}%2C${point.lng.toFixed(6)}`
     : null;
@@ -180,7 +181,7 @@ export const LiveTrainLocationCard: React.FC<LiveTrainLocationCardProps> = ({ tr
                 'border-slate-700 bg-slate-900 text-slate-400'
               }`}>
                 <span className={`h-1.5 w-1.5 rounded-full ${liveConfirmed ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
-                {liveConfirmed ? 'Provider reports live' : payload ? 'Check freshness' : 'Not connected'}
+                {liveConfirmed ? 'Provider reports live' : sourceIsStale ? 'Stale data' : payload && sourceFresh ? 'Provider status' : payload ? 'Check freshness' : 'Not connected'}
               </span>
             </div>
             <p className="mt-1 text-xs text-slate-400">{trainNumber} · {trainName}</p>
