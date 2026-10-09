@@ -73,6 +73,8 @@ export const JourneyTracker: React.FC<JourneyTrackerProps> = ({
   const [delayMinutes, setDelayMinutes] = useState(0);
   const [copiedShare, setCopiedShare] = useState(false);
   const [alarmTriggered, setAlarmTriggered] = useState(false);
+  const [deviceLocation, setDeviceLocation] = useState<{ latitude: number; longitude: number; accuracy: number } | null>(null);
+  const [locationStatus, setLocationStatus] = useState('Device location not shared');
 
   const stops = currentTrain.routeStops;
   const currentApproachingStop: RouteStop = stops[stopIndex] || stops[stops.length - 1];
@@ -138,6 +140,35 @@ ETA: ${currentApproachingStop.arrivalTime} (${delayMinutes === 0 ? 'On Time' : `
 Total covered: ${currentKm} km / ${totalJourneyKm} km`;
 
   const whatsappShareUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
+
+  // Device GPS is separate from train telemetry. Browsers require HTTPS and user permission.
+  const shareDeviceLocation = () => {
+    if (!('geolocation' in navigator)) {
+      setLocationStatus('This browser does not support location access');
+      return;
+    }
+    setLocationStatus('Requesting device location permission…');
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude, accuracy } = position.coords;
+        setDeviceLocation({ latitude, longitude, accuracy });
+        setLocationStatus(`Device GPS received (±${Math.round(accuracy)} m)`);
+        const mapsUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
+        const message = `My current device location (GPS): ${mapsUrl}\nAccuracy: about ${Math.round(accuracy)} metres.\n\nTrain selected: ${currentTrain.trainNumber} ${currentTrain.trainName}. Train running location is not confirmed by this device GPS.`;
+        const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
+        window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
+      },
+      (error) => {
+        const message = error.code === error.PERMISSION_DENIED
+          ? 'Location permission denied. Allow location access in your browser.'
+          : error.code === error.POSITION_UNAVAILABLE
+          ? 'Device location is unavailable. Check GPS/location settings.'
+          : 'Device location request timed out. Try again.';
+        setLocationStatus(message);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  };
 
   const handleShare = () => {
     if (navigator.clipboard) {
@@ -215,7 +246,7 @@ Total covered: ${currentKm} km / ${totalJourneyKm} km`;
         </div>
 
         {/* Action Controls: Live WhatsApp Location Share + Quick Dropdown */}
-        <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+        <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto lg:justify-end">
           <select
             value={currentTrain.trainNumber}
             onChange={(e) => {
@@ -235,16 +266,15 @@ Total covered: ${currentKm} km / ${totalJourneyKm} km`;
             ))}
           </select>
 
-          <a
-            href={whatsappShareUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow"
-            title="Share live location on WhatsApp"
+          <button
+            type="button"
+            onClick={shareDeviceLocation}
+            className="inline-flex min-h-9 items-center justify-center gap-1 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow whitespace-nowrap"
+            title="Share your current device GPS location on WhatsApp"
           >
-            <Share2 className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">WhatsApp Location</span>
-          </a>
+            <Share2 className="h-3.5 w-3.5 shrink-0" />
+            <span>Share GPS Location</span>
+          </button>
 
           <button
             onClick={handleShare}
@@ -254,14 +284,28 @@ Total covered: ${currentKm} km / ${totalJourneyKm} km`;
             <span className="hidden sm:inline">{copiedShare ? 'Copied' : 'Copy Status'}</span>
           </button>
         </div>
+        <div className="w-full text-[11px] text-slate-400 lg:text-right" aria-live="polite">
+          {locationStatus}
+          {deviceLocation && (
+            <a
+              className="ml-2 text-cyan-400 underline underline-offset-2"
+              href={`https://www.google.com/maps?q=${deviceLocation.latitude},${deviceLocation.longitude}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Open device GPS in Maps
+            </a>
+          )}
+          <span className="block text-[10px] text-slate-500">Device GPS is not the train's live GPS feed.</span>
+        </div>
       </div>
 
       {/* Quick Action Matrix for Commuters */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
         {/* Cabs / Auto (Ola, Uber, Rapido) */}
         <button
           onClick={onNavigateToNearby}
-          className="flex items-center gap-2.5 p-3 rounded-xl border border-lime-500/40 bg-slate-900/90 hover:bg-slate-800 text-left transition-all shadow hover:shadow-lime-500/20 group"
+          className="flex h-full min-w-0 items-center gap-2.5 p-3 rounded-xl border border-lime-500/40 bg-slate-900/90 hover:bg-slate-800 text-left transition-all shadow hover:shadow-lime-500/20 group"
         >
           <div className="h-8 w-8 rounded-lg bg-lime-500/10 text-lime-400 flex items-center justify-center shrink-0">
             <Car className="h-4 w-4" />
@@ -275,7 +319,7 @@ Total covered: ${currentKm} km / ${totalJourneyKm} km`;
         {/* Food Order to Seat */}
         <button
           onClick={onOpenFoodModal}
-          className="flex items-center gap-2.5 p-3 rounded-xl border border-amber-500/40 bg-slate-900/90 hover:bg-slate-800 text-left transition-all shadow hover:shadow-amber-500/20 group"
+          className="flex h-full min-w-0 items-center gap-2.5 p-3 rounded-xl border border-amber-500/40 bg-slate-900/90 hover:bg-slate-800 text-left transition-all shadow hover:shadow-amber-500/20 group"
         >
           <div className="h-8 w-8 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center shrink-0">
             <Utensils className="h-4 w-4" />
@@ -289,7 +333,7 @@ Total covered: ${currentKm} km / ${totalJourneyKm} km`;
         {/* RailMadad Official Complaint */}
         <button
           onClick={onOpenComplaintModal}
-          className="flex items-center gap-2.5 p-3 rounded-xl border border-red-500/40 bg-slate-900/90 hover:bg-slate-800 text-left transition-all shadow hover:shadow-red-500/20 group"
+          className="flex h-full min-w-0 items-center gap-2.5 p-3 rounded-xl border border-red-500/40 bg-slate-900/90 hover:bg-slate-800 text-left transition-all shadow hover:shadow-red-500/20 group"
         >
           <div className="h-8 w-8 rounded-lg bg-red-500/10 text-red-400 flex items-center justify-center shrink-0">
             <FileText className="h-4 w-4" />
@@ -303,7 +347,7 @@ Total covered: ${currentKm} km / ${totalJourneyKm} km`;
         {/* E-Ticket Download / Print */}
         <button
           onClick={onOpenTicketModal}
-          className="flex items-center gap-2.5 p-3 rounded-xl border border-cyan-500/40 bg-slate-900/90 hover:bg-slate-800 text-left transition-all shadow hover:shadow-cyan-500/20 group"
+          className="flex h-full min-w-0 items-center gap-2.5 p-3 rounded-xl border border-cyan-500/40 bg-slate-900/90 hover:bg-slate-800 text-left transition-all shadow hover:shadow-cyan-500/20 group"
         >
           <div className="h-8 w-8 rounded-lg bg-cyan-500/10 text-cyan-400 flex items-center justify-center shrink-0">
             <Ticket className="h-4 w-4" />
@@ -401,14 +445,14 @@ Total covered: ${currentKm} km / ${totalJourneyKm} km`;
             <div className="flex items-center gap-1.5">
               <button
                 onClick={() => setIsSimulating(!isSimulating)}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs transition-colors"
+                className="inline-flex items-center justify-center gap-1 min-h-8 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs transition-colors"
               >
                 {isSimulating ? <Pause className="h-3.5 w-3.5 text-amber-400" /> : <Play className="h-3.5 w-3.5 text-emerald-400" />}
                 <span>{isSimulating ? 'Pause' : 'Resume'}</span>
               </button>
               <button
                 onClick={resetSimulation}
-                className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
+                className="inline-flex items-center justify-center gap-1 min-h-8 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
               >
                 <RotateCcw className="h-3.5 w-3.5" />
               </button>
