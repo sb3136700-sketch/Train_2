@@ -29,6 +29,21 @@ import { playRailwayChime, playWakeupAlarm } from '../utils/audioChime';
 import { DestinationWeatherCard } from './DestinationWeatherCard';
 import { LuggageReminderCard } from './LuggageReminderCard';
 
+
+interface LiveTrainApiData {
+  trainNumber?: string;
+  trainName?: string;
+  lastUpdatedAt?: string;
+  status?: string;
+  delayMinutes?: number;
+  isLive?: boolean;
+  currentLocation?: { stationCode?: string; stationName?: string; sequence?: number; status?: string; isActualPosition?: boolean; segmentProgress?: number; speedKmh?: number; lat?: number; lng?: number; latitude?: number; longitude?: number; };
+  previousHalt?: { stationCode?: string; stationName?: string; };
+  nextHalt?: { stationCode?: string; stationName?: string; };
+  route?: Array<{ sequence?: number; stationCode?: string; stationName?: string; lat?: number; lng?: number; distance?: number; }>;
+}
+interface LiveTrainApiEnvelope { success?: boolean; data?: LiveTrainApiData; error?: string | { message?: string }; }
+
 interface JourneyTrackerProps {
   currentTrain: TrainDetails;
   allTrains: TrainDetails[];
@@ -70,9 +85,12 @@ export const JourneyTracker: React.FC<JourneyTrackerProps> = ({
   const [progressBetweenStops, setProgressBetweenStops] = useState(0.65);
   const [isSimulating, setIsSimulating] = useState(true);
   const [currentSpeed, setCurrentSpeed] = useState(currentTrain.avgSpeedKmph);
-  const [delayMinutes, setDelayMinutes] = useState(0);
   const [copiedShare, setCopiedShare] = useState(false);
   const [alarmTriggered, setAlarmTriggered] = useState(false);
+  const [liveStatus, setLiveStatus] = useState<LiveTrainApiData | null>(null);
+  const [liveStatusError, setLiveStatusError] = useState('');
+  const [liveStatusLoading, setLiveStatusLoading] = useState(false);
+  const [liveRefreshCount, setLiveRefreshCount] = useState(0);
 
   const stops = currentTrain.routeStops;
   const currentApproachingStop: RouteStop = stops[stopIndex] || stops[stops.length - 1];
@@ -86,6 +104,38 @@ export const JourneyTracker: React.FC<JourneyTrackerProps> = ({
   const remainingKm = Math.max(0, totalJourneyKm - currentKm);
   const totalPercent = Math.min(100, Math.max(0, Math.round((currentKm / totalJourneyKm) * 100)));
 
+  // Clear the previous train's live details as soon as the selected train changes.
+  useEffect(() => {
+    setLiveStatus(null);
+    setLiveStatusError('');
+  }, [currentTrain.trainNumber]);
+
+  // Fetch real railway running status from our server-side proxy; refresh every ten minutes.
+  useEffect(() => {
+    let cancelled = false;
+    const loadLiveStatus = async () => {
+      setLiveStatusLoading(true);
+      try {
+        const response = await fetch('/api/train-live/' + encodeURIComponent(currentTrain.trainNumber), { cache: 'no-store' });
+        const payload = await response.json() as LiveTrainApiEnvelope;
+        if (!response.ok || payload.success !== true || !payload.data) {
+          const apiError = typeof payload.error === 'string' ? payload.error : payload.error?.message;
+          throw new Error(apiError || 'Live train data could not be loaded.');
+        }
+        if (!cancelled) { setLiveStatus(payload.data); setLiveStatusError(''); }
+      } catch (error) {
+        if (!cancelled) {
+          setLiveStatus(null);
+          setLiveStatusError(error instanceof Error ? error.message : 'Live railway data is unavailable.');
+        }
+      } finally {
+        if (!cancelled) setLiveStatusLoading(false);
+      }
+    };
+    void loadLiveStatus();
+    const intervalId = window.setInterval(() => void loadLiveStatus(), 10 * 60 * 1000);
+    return () => { cancelled = true; window.clearInterval(intervalId); };
+  }, [currentTrain.trainNumber, liveRefreshCount]);
   // Simulation timer
   useEffect(() => {
     if (!isSimulating) return;
@@ -129,15 +179,27 @@ export const JourneyTracker: React.FC<JourneyTrackerProps> = ({
     }
   }, [alarm, currentApproachingStop.stationCode, progressBetweenStops, alarmTriggered]);
 
-  const shareText = `🚆 TRAIN JOURNEY LIVE LOCATION:
-Train: ${currentTrain.trainNumber} ${currentTrain.trainName}
-Speed: ${currentSpeed} km/h
-Approaching: ${currentApproachingStop.stationName} (${currentApproachingStop.stationCode})
-Expected Platform: PF ${currentApproachingStop.platform}
-ETA: ${currentApproachingStop.arrivalTime} (${delayMinutes === 0 ? 'On Time' : `${delayMinutes}m delay`})
-Total covered: ${currentKm} km / ${totalJourneyKm} km`;
-
-  const whatsappShareUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
+  const liveRoute = liveStatus?.route ?? [];
+  const providerLocation = liveStatus?.currentLocation;
+  const currentLocationPoint = liveRoute.find((point) => point.stationCode === providerLocation?.stationCode);
+  const previousLocationPoint = liveRoute.find((point) => point.stationCode === liveStatus?.previousHalt?.stationCode);
+  const nextLocationPoint = liveRoute.find((point) => point.stationCode === liveStatus?.nextHalt?.stationCode);
+  const directLatitude = providerLocation?.lat ?? providerLocation?.latitude;
+  const directLongitude = providerLocation?.lng ?? providerLocation?.longitude;
+  const hasDirectCoordinates = typeof directLatitude === 'number' && Number.isFinite(directLatitude) && typeof directLongitude === 'number' && Number.isFinite(directLongitude);
+  const hasInterpolatedCoordinates = typeof previousLocationPoint?.lat === 'number' && typeof previousLocationPoint?.lng === 'number' && typeof nextLocationPoint?.lat === 'number' && typeof nextLocationPoint?.lng === 'number' && typeof providerLocation?.segmentProgress === 'number' && Number.isFinite(providerLocation.segmentProgress);
+  const segmentProgress = hasInterpolatedCoordinates ? Math.min(1, Math.max(0, providerLocation?.segmentProgress ?? 0)) : 0;
+  const liveLatitude = hasDirectCoordinates ? directLatitude : hasInterpolatedCoordinates ? previousLocationPoint!.lat! + (nextLocationPoint!.lat! - previousLocationPoint!.lat!) * segmentProgress : currentLocationPoint?.lat;
+  const liveLongitude = hasDirectCoordinates ? directLongitude : hasInterpolatedCoordinates ? previousLocationPoint!.lng! + (nextLocationPoint!.lng! - previousLocationPoint!.lng!) * segmentProgress : currentLocationPoint?.lng;
+  const hasLiveMapPoint = typeof liveLatitude === 'number' && Number.isFinite(liveLatitude) && typeof liveLongitude === 'number' && Number.isFinite(liveLongitude);
+  const liveMapUrl = hasLiveMapPoint ? 'https://www.google.com/maps?q=' + liveLatitude + ',' + liveLongitude : providerLocation?.stationCode ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(providerLocation.stationCode + ' railway station India') : '';
+  const currentLiveStation = providerLocation?.stationName || currentLocationPoint?.stationName || providerLocation?.stationCode || 'Not reported';
+  const nextLiveStation = liveStatus?.nextHalt?.stationName || liveStatus?.nextHalt?.stationCode || 'Not reported';
+  const lastLiveUpdate = liveStatus?.lastUpdatedAt ? new Date(liveStatus.lastUpdatedAt).toLocaleString() : 'Time not supplied by provider';
+  const shareText = liveStatus
+    ? '🚆 LIVE TRAIN RUNNING STATUS\nTrain: ' + (liveStatus.trainNumber || currentTrain.trainNumber) + ' ' + (liveStatus.trainName || currentTrain.trainName) + '\nStatus: ' + (liveStatus.status || 'Not reported') + '\nCurrent reported location: ' + currentLiveStation + '\nNext halt: ' + nextLiveStation + '\nDelay: ' + (typeof liveStatus.delayMinutes === 'number' ? liveStatus.delayMinutes + ' minutes' : 'Not reported') + '\nSpeed: ' + (typeof providerLocation?.speedKmh === 'number' ? providerLocation.speedKmh + ' km/h' : 'Not reported') + (liveMapUrl ? '\nMap: ' + liveMapUrl : '') + '\nLast updated: ' + lastLiveUpdate + '\nNote: Train status is provided by the railway data feed.'
+    : '🚆 Train: ' + currentTrain.trainNumber + ' ' + currentTrain.trainName + '\nLive train location is currently unavailable in this app. The route animation is demo-only, not railway GPS. Please refresh later or configure the railway live-status API key on the server.';
+  const whatsappShareUrl = 'https://api.whatsapp.com/send?text=' + encodeURIComponent(shareText);
 
   const handleShare = () => {
     if (navigator.clipboard) {
@@ -197,8 +259,12 @@ Total covered: ${currentKm} km / ${totalJourneyKm} km`;
                 {currentTrain.type}
               </span>
               <span className="text-slate-500">·</span>
-              <span className={`text-xs font-semibold ${delayMinutes === 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
-                {delayMinutes === 0 ? '● Running On Time' : `▲ Delay ${delayMinutes}m`}
+              <span className={`text-xs font-semibold ${liveStatus ? (typeof liveStatus.delayMinutes === 'number' && liveStatus.delayMinutes > 0 ? 'text-amber-400' : 'text-emerald-400') : 'text-slate-400'}`}>
+                {liveStatus
+                  ? (typeof liveStatus.delayMinutes === 'number'
+                    ? (liveStatus.delayMinutes > 0 ? '▲ Delay ' + liveStatus.delayMinutes + 'm' : '● ' + (liveStatus.status || 'Live status received'))
+                    : '● ' + (liveStatus.status || 'Live status received'))
+                  : 'Live status shown below'}
               </span>
             </div>
             <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
@@ -215,7 +281,7 @@ Total covered: ${currentKm} km / ${totalJourneyKm} km`;
         </div>
 
         {/* Action Controls: Live WhatsApp Location Share + Quick Dropdown */}
-        <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+        <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto lg:justify-end">
           <select
             value={currentTrain.trainNumber}
             onChange={(e) => {
@@ -239,11 +305,11 @@ Total covered: ${currentKm} km / ${totalJourneyKm} km`;
             href={whatsappShareUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-1 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow"
-            title="Share live location on WhatsApp"
+            className="inline-flex min-h-9 items-center justify-center gap-1 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow whitespace-nowrap"
+            title="Share railway live status and reported location on WhatsApp"
           >
             <Share2 className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">WhatsApp Location</span>
+            <span>Share Train Status</span>
           </a>
 
           <button
@@ -256,12 +322,59 @@ Total covered: ${currentKm} km / ${totalJourneyKm} km`;
         </div>
       </div>
 
+      {/* Railway feed is separate from the local route animation. */}
+      <section className="rounded-2xl border border-cyan-500/30 bg-slate-900/90 p-5 shadow-xl" aria-live="polite">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-cyan-300">
+              <MapPin className="h-4 w-4" />
+              Railway Live Running Status
+            </div>
+            <p className="mt-1 text-xs text-slate-400">Actual railway feed, separate from the demo route animation.</p>
+          </div>
+          <button type="button" onClick={() => setLiveRefreshCount((count) => count + 1)} disabled={liveStatusLoading} className="inline-flex min-h-9 items-center justify-center gap-2 rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-200 transition-colors hover:bg-cyan-500/20 disabled:cursor-wait disabled:opacity-60">
+            <RotateCcw className={'h-3.5 w-3.5 ' + (liveStatusLoading ? 'animate-spin' : '')} />
+            {liveStatusLoading ? 'Checking feed…' : 'Refresh live status'}
+          </button>
+        </div>
+        {liveStatus ? (
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-3">
+              <div className="text-[11px] text-slate-400">Reported position</div>
+              <div className="mt-1 text-base font-bold text-white">{currentLiveStation}</div>
+              <div className="mt-1 text-[11px] text-slate-400">Next halt: <span className="text-slate-200">{nextLiveStation}</span></div>
+            </div>
+            <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-3">
+              <div className="text-[11px] text-slate-400">Live telemetry</div>
+              <div className="mt-1 text-base font-bold text-white">{typeof providerLocation?.speedKmh === 'number' ? providerLocation.speedKmh + ' km/h' : 'Speed not reported'}</div>
+              <div className="mt-1 text-[11px] text-slate-400">Delay: <span className="text-slate-200">{typeof liveStatus.delayMinutes === 'number' ? liveStatus.delayMinutes + ' min' : 'Not reported'}</span></div>
+            </div>
+            <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-3">
+              <div className="text-[11px] text-slate-400">Provider update</div>
+              <div className="mt-1 text-sm font-semibold text-white">{liveStatus.status || 'Running status received'}</div>
+              <div className="mt-1 text-[11px] text-slate-400">{lastLiveUpdate}</div>
+            </div>
+            <div className="md:col-span-3 flex flex-wrap items-center gap-3 pt-1">
+              {liveMapUrl && <a href={liveMapUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-lg bg-cyan-500 px-3 py-2 text-xs font-bold text-slate-950 hover:bg-cyan-400"><MapPin className="h-3.5 w-3.5" />Open reported position in Maps</a>}
+              <span className="text-[11px] text-slate-400">{hasDirectCoordinates ? 'Coordinates supplied by the live provider.' : hasInterpolatedCoordinates ? 'Map point estimated from provider segment progress and station coordinates.' : 'Map link uses the reported station; exact between-station GPS coordinates were not supplied.'}</span>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-4 rounded-xl border border-amber-500/25 bg-amber-500/5 p-4">
+            <p className="text-sm font-semibold text-amber-200">{liveStatusLoading ? 'Connecting to the railway live-status provider…' : 'Live railway feed not connected'}</p>
+            <p className="mt-1 text-xs text-slate-300">{liveStatusError || 'Waiting for a response from the railway data provider.'}</p>
+            <p className="mt-2 text-xs text-slate-400">Add <code className="rounded bg-slate-950 px-1.5 py-0.5 text-cyan-300">RAILRADAR_API_KEY</code> to the server environment, then restart/redeploy. The key must stay server-side.</p>
+            <a href="https://railradar.in/docs/live-train-status" target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-xs font-semibold text-cyan-300 underline underline-offset-4">Live API setup documentation</a>
+          </div>
+        )}
+      </section>
+
       {/* Quick Action Matrix for Commuters */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
         {/* Cabs / Auto (Ola, Uber, Rapido) */}
         <button
           onClick={onNavigateToNearby}
-          className="flex items-center gap-2.5 p-3 rounded-xl border border-lime-500/40 bg-slate-900/90 hover:bg-slate-800 text-left transition-all shadow hover:shadow-lime-500/20 group"
+          className="flex h-full min-w-0 items-center gap-2.5 p-3 rounded-xl border border-lime-500/40 bg-slate-900/90 hover:bg-slate-800 text-left transition-all shadow hover:shadow-lime-500/20 group"
         >
           <div className="h-8 w-8 rounded-lg bg-lime-500/10 text-lime-400 flex items-center justify-center shrink-0">
             <Car className="h-4 w-4" />
@@ -275,7 +388,7 @@ Total covered: ${currentKm} km / ${totalJourneyKm} km`;
         {/* Food Order to Seat */}
         <button
           onClick={onOpenFoodModal}
-          className="flex items-center gap-2.5 p-3 rounded-xl border border-amber-500/40 bg-slate-900/90 hover:bg-slate-800 text-left transition-all shadow hover:shadow-amber-500/20 group"
+          className="flex h-full min-w-0 items-center gap-2.5 p-3 rounded-xl border border-amber-500/40 bg-slate-900/90 hover:bg-slate-800 text-left transition-all shadow hover:shadow-amber-500/20 group"
         >
           <div className="h-8 w-8 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center shrink-0">
             <Utensils className="h-4 w-4" />
@@ -289,7 +402,7 @@ Total covered: ${currentKm} km / ${totalJourneyKm} km`;
         {/* RailMadad Official Complaint */}
         <button
           onClick={onOpenComplaintModal}
-          className="flex items-center gap-2.5 p-3 rounded-xl border border-red-500/40 bg-slate-900/90 hover:bg-slate-800 text-left transition-all shadow hover:shadow-red-500/20 group"
+          className="flex h-full min-w-0 items-center gap-2.5 p-3 rounded-xl border border-red-500/40 bg-slate-900/90 hover:bg-slate-800 text-left transition-all shadow hover:shadow-red-500/20 group"
         >
           <div className="h-8 w-8 rounded-lg bg-red-500/10 text-red-400 flex items-center justify-center shrink-0">
             <FileText className="h-4 w-4" />
@@ -303,7 +416,7 @@ Total covered: ${currentKm} km / ${totalJourneyKm} km`;
         {/* E-Ticket Download / Print */}
         <button
           onClick={onOpenTicketModal}
-          className="flex items-center gap-2.5 p-3 rounded-xl border border-cyan-500/40 bg-slate-900/90 hover:bg-slate-800 text-left transition-all shadow hover:shadow-cyan-500/20 group"
+          className="flex h-full min-w-0 items-center gap-2.5 p-3 rounded-xl border border-cyan-500/40 bg-slate-900/90 hover:bg-slate-800 text-left transition-all shadow hover:shadow-cyan-500/20 group"
         >
           <div className="h-8 w-8 rounded-lg bg-cyan-500/10 text-cyan-400 flex items-center justify-center shrink-0">
             <Ticket className="h-4 w-4" />
@@ -371,10 +484,10 @@ Total covered: ${currentKm} km / ${totalJourneyKm} km`;
         {/* Speedometer Gauge (Neon Emerald) */}
         <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 flex flex-col justify-between neon-glow-emerald">
           <div className="flex items-center justify-between text-xs text-slate-400">
-            <span className="font-bold text-emerald-400">Live Train Speed Gauge</span>
+            <span className="font-bold text-emerald-400">Demo Speed Animation</span>
             <div className="flex items-center gap-1.5">
               <span className={`inline-block h-2 w-2 rounded-full ${isSimulating ? 'bg-emerald-400 animate-ping' : 'bg-slate-500'}`} />
-              <span className="font-semibold">{isSimulating ? 'GPS Tracking Active' : 'Paused'}</span>
+              <span className="font-semibold">{liveStatus ? 'Live data shown above' : isSimulating ? 'Demo animation running' : 'Demo paused'}</span>
             </div>
           </div>
 
@@ -397,18 +510,18 @@ Total covered: ${currentKm} km / ${totalJourneyKm} km`;
           </div>
 
           <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-xs">
-            <span className="text-slate-400">Simulation controls:</span>
+            <span className="text-slate-400">Demo controls:</span>
             <div className="flex items-center gap-1.5">
               <button
                 onClick={() => setIsSimulating(!isSimulating)}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs transition-colors"
+                className="inline-flex items-center justify-center gap-1 min-h-8 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs transition-colors"
               >
                 {isSimulating ? <Pause className="h-3.5 w-3.5 text-amber-400" /> : <Play className="h-3.5 w-3.5 text-emerald-400" />}
                 <span>{isSimulating ? 'Pause' : 'Resume'}</span>
               </button>
               <button
                 onClick={resetSimulation}
-                className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
+                className="inline-flex items-center justify-center gap-1 min-h-8 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
               >
                 <RotateCcw className="h-3.5 w-3.5" />
               </button>
@@ -419,7 +532,7 @@ Total covered: ${currentKm} km / ${totalJourneyKm} km`;
         {/* Approaching Station Spotlight (Neon Amber) */}
         <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 flex flex-col justify-between neon-glow-amber">
           <div className="flex items-center justify-between text-xs text-slate-400">
-            <span className="font-bold text-amber-400">Approaching Next Station</span>
+            <span className="font-bold text-amber-400">Demo Next Station</span>
             <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-lg bg-slate-800 text-amber-300 border border-slate-700">
               Platform {currentApproachingStop.platform}
             </span>
@@ -462,7 +575,7 @@ Total covered: ${currentKm} km / ${totalJourneyKm} km`;
         {/* Progress & Wake-up Alarm */}
         <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 flex flex-col justify-between neon-glow-cyan">
           <div className="flex items-center justify-between text-xs text-slate-400">
-            <span className="font-bold text-cyan-400">Journey Distance Progress</span>
+            <span className="font-bold text-cyan-400">Demo Journey Progress</span>
             <span className="font-mono text-cyan-300 font-bold">{totalPercent}%</span>
           </div>
 
@@ -506,8 +619,8 @@ Total covered: ${currentKm} km / ${totalJourneyKm} km`;
       <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-xl">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h3 className="text-sm font-bold text-white">Corridor Halt Tracker</h3>
-            <p className="text-xs text-slate-400">Approaching stops until final terminus</p>
+            <h3 className="text-sm font-bold text-white">Demo Route Animation</h3>
+            <p className="text-xs text-slate-400">Illustrative route progress only — not live GPS</p>
           </div>
           <button
             onClick={onNavigateToRoute}
