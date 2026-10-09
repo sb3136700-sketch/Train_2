@@ -192,9 +192,7 @@ export const JourneyTracker: React.FC<JourneyTrackerProps> = ({
                 {currentTrain.type}
               </span>
               <span className="text-slate-500">·</span>
-              <span className={`text-xs font-semibold ${delayMinutes === 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
-                {delayMinutes === 0 ? '● Running On Time' : `▲ Delay ${delayMinutes}m`}
-              </span>
+              <span className="text-xs font-semibold text-cyan-300">● Schedule preview · Live status below</span>
             </div>
             <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
               {currentTrain.trainName}
@@ -394,7 +392,7 @@ export const JourneyTracker: React.FC<JourneyTrackerProps> = ({
           </div>
 
           <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-xs">
-            <span className="text-slate-400">Simulation controls:</span>
+            <span className="text-slate-400">Optional demo simulation (not live GPS):</span>
             <div className="flex items-center gap-1.5">
               <button
                 onClick={() => setIsSimulating(!isSimulating)}
@@ -449,9 +447,9 @@ export const JourneyTracker: React.FC<JourneyTrackerProps> = ({
           )}
 
           <div className="mt-3 pt-3 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
-            <span>Distance to stop:</span>
+            <span>Demo distance to stop:</span>
             <span className="font-mono text-white font-bold text-sm">
-              {Math.max(0, currentApproachingStop.distanceKm - currentKm)} km
+              {isSimulating ? `${Math.max(0, currentApproachingStop.distanceKm - currentKm)} km (demo)` : '—'}
             </span>
           </div>
         </div>
@@ -459,20 +457,20 @@ export const JourneyTracker: React.FC<JourneyTrackerProps> = ({
         {/* Progress & Wake-up Alarm */}
         <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 flex flex-col justify-between neon-glow-cyan">
           <div className="flex items-center justify-between text-xs text-slate-400">
-            <span className="font-bold text-cyan-400">Journey Distance Progress</span>
-            <span className="font-mono text-cyan-300 font-bold">{totalPercent}%</span>
+            <span className="font-bold text-cyan-400">Demo Journey Progress (not live)</span>
+            <span className="font-mono text-cyan-300 font-bold">{isSimulating ? `${totalPercent}%` : '—'}</span>
           </div>
 
           <div className="my-3 space-y-2">
             <div className="flex items-baseline justify-between text-xs">
-              <span className="text-slate-400">Covered: <strong className="text-white font-mono">{currentKm} km</strong></span>
-              <span className="text-slate-400">Remaining: <strong className="text-white font-mono">{remainingKm} km</strong></span>
+              <span className="text-slate-400">Covered: <strong className="text-white font-mono">{isSimulating ? `${currentKm} km` : '—'}</strong></span>
+              <span className="text-slate-400">Remaining: <strong className="text-white font-mono">{isSimulating ? `${remainingKm} km` : '—'}</strong></span>
             </div>
             
             <div className="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden">
               <div
                 className="bg-cyan-400 h-2.5 rounded-full transition-all duration-700 shadow"
-                style={{ width: `${totalPercent}%` }}
+                style={{ width: `${isSimulating ? totalPercent : 0}%` }}
               />
             </div>
           </div>
