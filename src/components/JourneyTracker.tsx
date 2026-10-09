@@ -104,7 +104,13 @@ export const JourneyTracker: React.FC<JourneyTrackerProps> = ({
   const remainingKm = Math.max(0, totalJourneyKm - currentKm);
   const totalPercent = Math.min(100, Math.max(0, Math.round((currentKm / totalJourneyKm) * 100)));
 
-  // Fetch real railway running status from our server-side proxy; refresh every five minutes.
+  // Clear the previous train's live details as soon as the selected train changes.
+  useEffect(() => {
+    setLiveStatus(null);
+    setLiveStatusError('');
+  }, [currentTrain.trainNumber]);
+
+  // Fetch real railway running status from our server-side proxy; refresh every ten minutes.
   useEffect(() => {
     let cancelled = false;
     const loadLiveStatus = async () => {
@@ -127,7 +133,7 @@ export const JourneyTracker: React.FC<JourneyTrackerProps> = ({
       }
     };
     void loadLiveStatus();
-    const intervalId = window.setInterval(() => void loadLiveStatus(), 5 * 60 * 1000);
+    const intervalId = window.setInterval(() => void loadLiveStatus(), 10 * 60 * 1000);
     return () => { cancelled = true; window.clearInterval(intervalId); };
   }, [currentTrain.trainNumber, liveRefreshCount]);
   // Simulation timer
@@ -178,11 +184,13 @@ export const JourneyTracker: React.FC<JourneyTrackerProps> = ({
   const currentLocationPoint = liveRoute.find((point) => point.stationCode === providerLocation?.stationCode);
   const previousLocationPoint = liveRoute.find((point) => point.stationCode === liveStatus?.previousHalt?.stationCode);
   const nextLocationPoint = liveRoute.find((point) => point.stationCode === liveStatus?.nextHalt?.stationCode);
-  const hasDirectCoordinates = typeof providerLocation?.lat === 'number' && Number.isFinite(providerLocation.lat) && typeof providerLocation?.lng === 'number' && Number.isFinite(providerLocation.lng);
+  const directLatitude = providerLocation?.lat ?? providerLocation?.latitude;
+  const directLongitude = providerLocation?.lng ?? providerLocation?.longitude;
+  const hasDirectCoordinates = typeof directLatitude === 'number' && Number.isFinite(directLatitude) && typeof directLongitude === 'number' && Number.isFinite(directLongitude);
   const hasInterpolatedCoordinates = typeof previousLocationPoint?.lat === 'number' && typeof previousLocationPoint?.lng === 'number' && typeof nextLocationPoint?.lat === 'number' && typeof nextLocationPoint?.lng === 'number' && typeof providerLocation?.segmentProgress === 'number' && Number.isFinite(providerLocation.segmentProgress);
   const segmentProgress = hasInterpolatedCoordinates ? Math.min(1, Math.max(0, providerLocation?.segmentProgress ?? 0)) : 0;
-  const liveLatitude = hasDirectCoordinates ? providerLocation?.lat : hasInterpolatedCoordinates ? previousLocationPoint!.lat! + (nextLocationPoint!.lat! - previousLocationPoint!.lat!) * segmentProgress : currentLocationPoint?.lat;
-  const liveLongitude = hasDirectCoordinates ? providerLocation?.lng : hasInterpolatedCoordinates ? previousLocationPoint!.lng! + (nextLocationPoint!.lng! - previousLocationPoint!.lng!) * segmentProgress : currentLocationPoint?.lng;
+  const liveLatitude = hasDirectCoordinates ? directLatitude : hasInterpolatedCoordinates ? previousLocationPoint!.lat! + (nextLocationPoint!.lat! - previousLocationPoint!.lat!) * segmentProgress : currentLocationPoint?.lat;
+  const liveLongitude = hasDirectCoordinates ? directLongitude : hasInterpolatedCoordinates ? previousLocationPoint!.lng! + (nextLocationPoint!.lng! - previousLocationPoint!.lng!) * segmentProgress : currentLocationPoint?.lng;
   const hasLiveMapPoint = typeof liveLatitude === 'number' && Number.isFinite(liveLatitude) && typeof liveLongitude === 'number' && Number.isFinite(liveLongitude);
   const liveMapUrl = hasLiveMapPoint ? 'https://www.google.com/maps?q=' + liveLatitude + ',' + liveLongitude : providerLocation?.stationCode ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(providerLocation.stationCode + ' railway station India') : '';
   const currentLiveStation = providerLocation?.stationName || currentLocationPoint?.stationName || providerLocation?.stationCode || 'Not reported';
