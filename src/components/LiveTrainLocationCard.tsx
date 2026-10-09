@@ -128,7 +128,7 @@ export const LiveTrainLocationCard: React.FC<LiveTrainLocationCardProps> = ({ tr
     if (!payload || !location) return null;
     const exactLat = location.lat ?? location.latitude;
     const exactLng = location.lng ?? location.longitude;
-    if (validCoordinate(exactLat, exactLng)) return { lat: exactLat, lng: exactLng, source: 'provider' };
+    if (typeof exactLat === 'number' && typeof exactLng === 'number' && validCoordinate(exactLat, exactLng)) return { lat: exactLat, lng: exactLng, source: 'provider' };
 
     const route = payload.route || [];
     const prev = route.find((p) =>
@@ -141,7 +141,7 @@ export const LiveTrainLocationCard: React.FC<LiveTrainLocationCardProps> = ({ tr
     );
     const progress = location.segmentProgress;
     if (
-      prev && next && validCoordinate(prev.lat, prev.lng) && validCoordinate(next.lat, next.lng) &&
+      prev && next && typeof prev.lat === 'number' && typeof prev.lng === 'number' && typeof next.lat === 'number' && typeof next.lng === 'number' && validCoordinate(prev.lat, prev.lng) && validCoordinate(next.lat, next.lng) &&
       typeof progress === 'number' && Number.isFinite(progress) && progress >= 0 && progress <= 1
     ) {
       // This is a station-to-station interpolation, not a GPS fix. Always label it as approximate.
