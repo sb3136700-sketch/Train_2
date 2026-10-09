@@ -66,6 +66,7 @@ app.get('/api/trains/:trainNumber/live', async (req, res) => {
     if (req.query.date && /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date))) {
       url.searchParams.set('date', String(req.query.date));
     }
+    url.searchParams.set('authoritative', 'true');
     url.searchParams.set('includeCoordinates', 'true');
     url.searchParams.set('geometry', 'true');
     url.searchParams.set('format', 'geojson');
@@ -89,10 +90,11 @@ app.get('/api/trains/:trainNumber/live', async (req, res) => {
     const data = body.data || body;
     const payload = {
       ok: true,
-      status: 'live',
+      status: data.isLive === true ? 'live' : 'stale',
       provider: 'RailRadar',
       fetchedAt: new Date().toISOString(),
-      sourceUpdatedAt: data.lastUpdatedAt || body.meta?.timestamp || null,
+      sourceUpdatedAt: data.lastUpdatedAt || null,
+      providerResponseAt: body.meta?.timestamp || null,
       trainNumber: data.trainNumber || trainNumber,
       trainName: data.trainName || data.train?.name || null,
       runDate: data.startDate || null,
@@ -102,7 +104,7 @@ app.get('/api/trains/:trainNumber/live', async (req, res) => {
       previousHalt: data.previousHalt || null,
       nextHalt: data.nextHalt || null,
       route: Array.isArray(data.route) ? data.route : [],
-      geometry: data.geometry || null,
+      geometry: data.geometry || data.geojson || null,
       isLive: data.isLive === true
     };
     trainStatusCache.set(cacheKey, { fetchedAtMs: Date.now(), payload });
