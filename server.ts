@@ -35,6 +35,104 @@ const FALLBACK_ANSWERS: Record<string, string> = {
   berth: "Lower Berths (LB) are ideal for senior citizens. Middle Berths (MB) should be folded up during daytime (6:00 AM to 10:00 PM) to allow Lower and Upper berth passengers to sit comfortably, as per official IRCTC rules."
 };
 
+// Live train tracking proxy. Provider credentials stay server-side.
+// When live data is unavailable, return an explicit error instead of synthetic GPS.
+type JsonRecord = Record<string, any>;
+const trainStatusCache = new Map<string, { fetchedAtMs: number; payload: JsonRecord }>();
+const LIVE_TRAIN_CACHE_MS = 20_000;
+const TRAIN_STATUS_TIMEOUT_MS = 8_000;
+
+app.get('/api/trains/:trainNumber/live', async (req, res) => {
+  const trainNumber = String(req.params.trainNumber || '').trim();
+  if (!/^\d{5}$/.test(trainNumber)) {
+    res.status(400).json({ ok: false, status: 'invalid', error: 'Train number must contain exactly 5 digits.' });
+    return;
+  }
+
+  const providerKey = process.env.RAILRADAR_API_KEY;
+  const baseUrl = (process.env.RAILRADAR_BASE_URL || 'https://api.railradar.in/v1').replace(/\/$/, '');
+  if (!providerKey) {
+    res.status(503).json({
+      ok: false,
+      status: 'unavailable',
+      provider: null,
+      message: 'Live tracking is not configured. Set RAILRADAR_API_KEY in the server environment. No simulated location is shown as live.'
+    });
+    return;
+  }
+
+  const cacheKey = `${trainNumber}:${String(req.query.date || '')}`;
+  const cached = trainStatusCache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAtMs < LIVE_TRAIN_CACHE_MS && req.query.refresh !== 'true') {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ ...cached.payload, cacheAgeSeconds: Math.floor((Date.now() - cached.fetchedAtMs) / 1000) });
+    return;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TRAIN_STATUS_TIMEOUT_MS);
+  try {
+    const url = new URL(`${baseUrl}/trains/${encodeURIComponent(trainNumber)}/live`);
+    if (req.query.date && /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date))) {
+      url.searchParams.set('date', String(req.query.date));
+    }
+    url.searchParams.set('authoritative', 'true');
+    url.searchParams.set('includeCoordinates', 'true');
+    url.searchParams.set('geometry', 'true');
+    url.searchParams.set('format', 'geojson');
+
+    const upstream = await fetch(url, {
+      headers: { Authorization: `Bearer ${providerKey}`, Accept: 'application/json' },
+      signal: controller.signal
+    });
+    const body = await upstream.json().catch(() => ({} as JsonRecord)) as JsonRecord;
+    if (!upstream.ok || body.success === false) {
+      const status = upstream.status === 401 || upstream.status === 403 ? 'provider_auth_error' :
+        upstream.status === 404 ? 'not_found' :
+        upstream.status === 429 ? 'rate_limited' : 'provider_error';
+      res.status(upstream.status === 404 ? 404 : upstream.status === 429 ? 429 : 502).json({
+        ok: false, status, provider: 'RailRadar',
+        message: body?.error?.message || `Live status provider returned HTTP ${upstream.status}.`
+      });
+      return;
+    }
+
+    const data = body.data || body;
+    const payload = {
+      ok: true,
+      status: data.isLive === true ? 'live' : 'stale',
+      provider: 'RailRadar',
+      fetchedAt: new Date().toISOString(),
+      sourceUpdatedAt: data.lastUpdatedAt || null,
+      providerResponseAt: body.meta?.timestamp || null,
+      trainNumber: data.trainNumber || trainNumber,
+      trainName: data.trainName || data.train?.name || null,
+      runDate: data.startDate || null,
+      runningStatus: data.status || null,
+      delayMinutes: Number.isFinite(data.delayMinutes) ? data.delayMinutes : null,
+      currentLocation: data.currentLocation || null,
+      previousHalt: data.previousHalt || null,
+      nextHalt: data.nextHalt || null,
+      route: Array.isArray(data.route) ? data.route : [],
+      geometry: data.geometry || data.geojson || null,
+      isLive: data.isLive === true
+    };
+    trainStatusCache.set(cacheKey, { fetchedAtMs: Date.now(), payload });
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(payload);
+  } catch (error) {
+    const timedOut = error instanceof Error && error.name === 'AbortError';
+    res.status(502).json({
+      ok: false,
+      status: timedOut ? 'timeout' : 'provider_unavailable',
+      provider: 'RailRadar',
+      message: timedOut ? 'Live status request timed out. Try again shortly.' : 'Unable to retrieve live train status right now.'
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+});
+
 // Rail Travel AI Assistant endpoint
 app.post('/api/rail-assistant', async (req, res) => {
   try {
@@ -90,6 +188,8 @@ Provide a helpful, precise, friendly answer (under 160 words). Include practical
   }
 });
 
+
+
 // Setup Vite middleware in dev or static files in production
 async function startServer() {
   const isProd = process.env.NODE_ENV === 'production';
@@ -105,7 +205,7 @@ async function startServer() {
     const distPath = path.resolve(__dirname, 'dist');
     app.use(express.static(distPath));
     app.get('*', (_req, res) => {
-      res.sendFile(path.resolve(distPath, 'index.html'));
+      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
     });
   }
 

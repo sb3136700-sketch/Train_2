@@ -28,6 +28,7 @@ import { TrainDetails, RouteStop, DestinationAlarm, UserProfile } from '../types
 import { playRailwayChime, playWakeupAlarm } from '../utils/audioChime';
 import { DestinationWeatherCard } from './DestinationWeatherCard';
 import { LuggageReminderCard } from './LuggageReminderCard';
+import { LiveTrainLocationCard } from './LiveTrainLocationCard';
 
 interface JourneyTrackerProps {
   currentTrain: TrainDetails;
@@ -68,9 +69,8 @@ export const JourneyTracker: React.FC<JourneyTrackerProps> = ({
 }) => {
   const [stopIndex, setStopIndex] = useState(1);
   const [progressBetweenStops, setProgressBetweenStops] = useState(0.65);
-  const [isSimulating, setIsSimulating] = useState(true);
+  const [isSimulating, setIsSimulating] = useState(false);
   const [currentSpeed, setCurrentSpeed] = useState(currentTrain.avgSpeedKmph);
-  const [delayMinutes, setDelayMinutes] = useState(0);
   const [copiedShare, setCopiedShare] = useState(false);
   const [alarmTriggered, setAlarmTriggered] = useState(false);
 
@@ -129,13 +129,7 @@ export const JourneyTracker: React.FC<JourneyTrackerProps> = ({
     }
   }, [alarm, currentApproachingStop.stationCode, progressBetweenStops, alarmTriggered]);
 
-  const shareText = `🚆 TRAIN JOURNEY LIVE LOCATION:
-Train: ${currentTrain.trainNumber} ${currentTrain.trainName}
-Speed: ${currentSpeed} km/h
-Approaching: ${currentApproachingStop.stationName} (${currentApproachingStop.stationCode})
-Expected Platform: PF ${currentApproachingStop.platform}
-ETA: ${currentApproachingStop.arrivalTime} (${delayMinutes === 0 ? 'On Time' : `${delayMinutes}m delay`})
-Total covered: ${currentKm} km / ${totalJourneyKm} km`;
+  const shareText = `🚆 RAILSAFE JOURNEY STATUS (route preview, not GPS)\nTrain: ${currentTrain.trainNumber} ${currentTrain.trainName}\nDemo speed: ${isSimulating ? `${currentSpeed} km/h (simulated)` : 'Unavailable in route preview'}\nScheduled next stop: ${currentApproachingStop.stationName} (${currentApproachingStop.stationCode})\nScheduled platform: ${currentApproachingStop.platform}\nScheduled arrival: ${currentApproachingStop.arrivalTime}\nDemo route progress: ${isSimulating ? `${currentKm} km` : 'not active'} / ${totalJourneyKm} km\nFor provider-backed status, see the Real-time train status panel in RailSafe.`;
 
   const whatsappShareUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
 
@@ -165,7 +159,7 @@ Total covered: ${currentKm} km / ${totalJourneyKm} km`;
             </div>
             <div>
               <div className="text-sm font-bold text-white">
-                STATION ALARM: Approaching {currentApproachingStop.stationName} ({currentApproachingStop.stationCode})!
+                DEMO STATION ALARM: Route preview near {currentApproachingStop.stationName} ({currentApproachingStop.stationCode})!
               </div>
               <div className="text-xs text-amber-200">
                 Scheduled arrival: {currentApproachingStop.arrivalTime} · Platform {currentApproachingStop.platform}. Get ready to deboard!
@@ -197,9 +191,7 @@ Total covered: ${currentKm} km / ${totalJourneyKm} km`;
                 {currentTrain.type}
               </span>
               <span className="text-slate-500">·</span>
-              <span className={`text-xs font-semibold ${delayMinutes === 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
-                {delayMinutes === 0 ? '● Running On Time' : `▲ Delay ${delayMinutes}m`}
-              </span>
+              <span className="text-xs font-semibold text-cyan-300">● Schedule preview · Live status below</span>
             </div>
             <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
               {currentTrain.trainName}
@@ -240,10 +232,10 @@ Total covered: ${currentKm} km / ${totalJourneyKm} km`;
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-1 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow"
-            title="Share live location on WhatsApp"
+            title="Share journey status (not GPS location)"
           >
             <Share2 className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">WhatsApp Location</span>
+            <span className="hidden sm:inline">Share Journey Status</span>
           </a>
 
           <button
@@ -255,6 +247,8 @@ Total covered: ${currentKm} km / ${totalJourneyKm} km`;
           </button>
         </div>
       </div>
+
+      <LiveTrainLocationCard trainNumber={currentTrain.trainNumber} trainName={currentTrain.trainName} />
 
       {/* Quick Action Matrix for Commuters */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -371,10 +365,10 @@ Total covered: ${currentKm} km / ${totalJourneyKm} km`;
         {/* Speedometer Gauge (Neon Emerald) */}
         <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 flex flex-col justify-between neon-glow-emerald">
           <div className="flex items-center justify-between text-xs text-slate-400">
-            <span className="font-bold text-emerald-400">Live Train Speed Gauge</span>
+            <span className="font-bold text-emerald-400">Demo Route Telemetry (not live)</span>
             <div className="flex items-center gap-1.5">
               <span className={`inline-block h-2 w-2 rounded-full ${isSimulating ? 'bg-emerald-400 animate-ping' : 'bg-slate-500'}`} />
-              <span className="font-semibold">{isSimulating ? 'GPS Tracking Active' : 'Paused'}</span>
+              <span className="font-semibold">{isSimulating ? 'Demo simulation running' : 'Demo simulation paused'}</span>
             </div>
           </div>
 
@@ -392,12 +386,12 @@ Total covered: ${currentKm} km / ${totalJourneyKm} km`;
           <div className="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden">
             <div
               className="bg-gradient-to-r from-emerald-500 via-cyan-400 to-amber-500 h-2.5 rounded-full transition-all duration-700 shadow"
-              style={{ width: `${Math.min(100, (currentSpeed / currentTrain.maxSpeedKmph) * 100)}%` }}
+              style={{ width: `${isSimulating ? Math.min(100, (currentSpeed / currentTrain.maxSpeedKmph) * 100) : 0}%` }}
             />
           </div>
 
           <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-xs">
-            <span className="text-slate-400">Simulation controls:</span>
+            <span className="text-slate-400">Optional demo simulation (not live GPS):</span>
             <div className="flex items-center gap-1.5">
               <button
                 onClick={() => setIsSimulating(!isSimulating)}
@@ -419,7 +413,7 @@ Total covered: ${currentKm} km / ${totalJourneyKm} km`;
         {/* Approaching Station Spotlight (Neon Amber) */}
         <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 flex flex-col justify-between neon-glow-amber">
           <div className="flex items-center justify-between text-xs text-slate-400">
-            <span className="font-bold text-amber-400">Approaching Next Station</span>
+            <span className="font-bold text-amber-400">Next Scheduled Stop (not live)</span>
             <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-lg bg-slate-800 text-amber-300 border border-slate-700">
               Platform {currentApproachingStop.platform}
             </span>
@@ -452,9 +446,9 @@ Total covered: ${currentKm} km / ${totalJourneyKm} km`;
           )}
 
           <div className="mt-3 pt-3 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
-            <span>Distance to stop:</span>
+            <span>Demo distance to stop:</span>
             <span className="font-mono text-white font-bold text-sm">
-              {Math.max(0, currentApproachingStop.distanceKm - currentKm)} km
+              {isSimulating ? `${Math.max(0, currentApproachingStop.distanceKm - currentKm)} km (demo)` : '—'}
             </span>
           </div>
         </div>
@@ -462,20 +456,20 @@ Total covered: ${currentKm} km / ${totalJourneyKm} km`;
         {/* Progress & Wake-up Alarm */}
         <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 flex flex-col justify-between neon-glow-cyan">
           <div className="flex items-center justify-between text-xs text-slate-400">
-            <span className="font-bold text-cyan-400">Journey Distance Progress</span>
-            <span className="font-mono text-cyan-300 font-bold">{totalPercent}%</span>
+            <span className="font-bold text-cyan-400">Demo Journey Progress (not live)</span>
+            <span className="font-mono text-cyan-300 font-bold">{isSimulating ? `${totalPercent}%` : '—'}</span>
           </div>
 
           <div className="my-3 space-y-2">
             <div className="flex items-baseline justify-between text-xs">
-              <span className="text-slate-400">Covered: <strong className="text-white font-mono">{currentKm} km</strong></span>
-              <span className="text-slate-400">Remaining: <strong className="text-white font-mono">{remainingKm} km</strong></span>
+              <span className="text-slate-400">Covered: <strong className="text-white font-mono">{isSimulating ? `${currentKm} km` : '—'}</strong></span>
+              <span className="text-slate-400">Remaining: <strong className="text-white font-mono">{isSimulating ? `${remainingKm} km` : '—'}</strong></span>
             </div>
             
             <div className="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden">
               <div
                 className="bg-cyan-400 h-2.5 rounded-full transition-all duration-700 shadow"
-                style={{ width: `${totalPercent}%` }}
+                style={{ width: `${isSimulating ? totalPercent : 0}%` }}
               />
             </div>
           </div>
