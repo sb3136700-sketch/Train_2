@@ -25,6 +25,16 @@ if (apiKey) {
   }
 }
 
+// Fallback Indian Railways Knowledge Base
+const FALLBACK_ANSWERS: Record<string, string> = {
+  tatkal: "Tatkal booking opens 1 day in advance of the train origin departure date. AC classes (1A, 2A, 3A, 3E, CC, EC) open at 10:00 AM IST sharp, while Non-AC classes (Sleeper SL, 2S) open at 11:00 AM IST. Tip: Add passenger details to your IRCTC Master List 24 hours prior to 1-click fill!",
+  rac: "RAC (Reservation Against Cancellation) guarantees travel on the train! Two RAC ticket holders share one Side Lower berth for sitting during daytime and sleeping. If any confirmed passenger cancels or doesn't show up, RAC 1 is automatically upgraded to full confirmed berth.",
+  refund: "If your train is delayed by more than 3 hours at your boarding station, you are entitled to a 100% full refund without cancellation charges by filing a TDR (Ticket Deposit Receipt) before the actual departure of the train.",
+  luggage: "Free luggage allowance on Indian Railways: 1st AC allows 70 kg, 2nd AC allows 50 kg, 3rd AC & Chair Car allow 40 kg, and Sleeper class allows 40 kg. Maximum dimensions should not exceed 100cm x 60cm x 25cm to fit safely under berths.",
+  food: "You can pre-book e-catering meals via IRCTC eCatering app or dial 1323 with your 10-digit PNR. Meals from reputed brands (Haldiram, Domino's, Saravana Bhavan, Bikanervala) are delivered right to your train seat at designated halts!",
+  berth: "Lower Berths (LB) are ideal for senior citizens. Middle Berths (MB) should be folded up during daytime (6:00 AM to 10:00 PM) to allow Lower and Upper berth passengers to sit comfortably, as per official IRCTC rules."
+};
+
 // Live train tracking proxy. Provider credentials stay server-side.
 // When live data is unavailable, return an explicit error instead of synthetic GPS.
 type JsonRecord = Record<string, any>;
@@ -178,15 +188,7 @@ Provide a helpful, precise, friendly answer (under 160 words). Include practical
   }
 });
 
-// Fallback Indian Railways Knowledge Base
-const FALLBACK_ANSWERS: Record<string, string> = {
-  tatkal: "Tatkal booking opens 1 day in advance of the train origin departure date. AC classes (1A, 2A, 3A, 3E, CC, EC) open at 10:00 AM IST sharp, while Non-AC classes (Sleeper SL, 2S) open at 11:00 AM IST. Tip: Add passenger details to your IRCTC Master List 24 hours prior to 1-click fill!",
-  rac: "RAC (Reservation Against Cancellation) guarantees travel on the train! Two RAC ticket holders share one Side Lower berth for sitting during daytime and sleeping. If any confirmed passenger cancels or doesn't show up, RAC 1 is automatically upgraded to full confirmed berth.",
-  refund: "If your train is delayed by more than 3 hours at your boarding station, you are entitled to a 100% full refund without cancellation charges by filing a TDR (Ticket Deposit Receipt) before the actual departure of the train.",
-  luggage: "Free luggage allowance on Indian Railways: 1st AC allows 70 kg, 2nd AC allows 50 kg, 3rd AC & Chair Car allow 40 kg, and Sleeper class allows 40 kg. Maximum dimensions should not exceed 100cm x 60cm x 25cm to fit safely under berths.",
-  food: "You can pre-book e-catering meals via IRCTC eCatering app or dial 1323 with your 10-digit PNR. Meals from reputed brands (Haldiram, Domino's, Saravana Bhavan, Bikanervala) are delivered right to your train seat at designated halts!",
-  berth: "Lower Berths (LB) are ideal for senior citizens. Middle Berths (MB) should be folded up during daytime (6:00 AM to 10:00 PM) to allow Lower and Upper berth passengers to sit comfortably, as per official IRCTC rules."
-};
+
 
 // Setup Vite middleware in dev or static files in production
 async function startServer() {
