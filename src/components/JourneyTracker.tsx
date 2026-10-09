@@ -71,7 +71,6 @@ export const JourneyTracker: React.FC<JourneyTrackerProps> = ({
   const [progressBetweenStops, setProgressBetweenStops] = useState(0.65);
   const [isSimulating, setIsSimulating] = useState(false);
   const [currentSpeed, setCurrentSpeed] = useState(currentTrain.avgSpeedKmph);
-  const [delayMinutes, setDelayMinutes] = useState(0);
   const [copiedShare, setCopiedShare] = useState(false);
   const [alarmTriggered, setAlarmTriggered] = useState(false);
 
@@ -130,7 +129,7 @@ export const JourneyTracker: React.FC<JourneyTrackerProps> = ({
     }
   }, [alarm, currentApproachingStop.stationCode, progressBetweenStops, alarmTriggered]);
 
-  const shareText = `🚆 RAILSAFE JOURNEY STATUS (route preview, not GPS)\nTrain: ${currentTrain.trainNumber} ${currentTrain.trainName}\nDemo speed: ${isSimulating ? `${isSimulating ? currentSpeed : '—'} km/h (simulated)` : 'Unavailable in route preview'}\nScheduled next stop: ${currentApproachingStop.stationName} (${currentApproachingStop.stationCode})\nScheduled platform: ${currentApproachingStop.platform}\nScheduled arrival: ${currentApproachingStop.arrivalTime}\nDemo route progress: ${isSimulating ? `${currentKm} km` : 'not active'} / ${totalJourneyKm} km\nFor provider-backed status, see the Real-time train status panel in RailSafe.`;
+  const shareText = `🚆 RAILSAFE JOURNEY STATUS (route preview, not GPS)\nTrain: ${currentTrain.trainNumber} ${currentTrain.trainName}\nDemo speed: ${isSimulating ? `${currentSpeed} km/h (simulated)` : 'Unavailable in route preview'}\nScheduled next stop: ${currentApproachingStop.stationName} (${currentApproachingStop.stationCode})\nScheduled platform: ${currentApproachingStop.platform}\nScheduled arrival: ${currentApproachingStop.arrivalTime}\nDemo route progress: ${isSimulating ? `${currentKm} km` : 'not active'} / ${totalJourneyKm} km\nFor provider-backed status, see the Real-time train status panel in RailSafe.`;
 
   const whatsappShareUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
 
